@@ -1,0 +1,87 @@
+name: seal-build
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  pack:
+    name: pack npm tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The published tarball ships dist/cdn/*. Those copies come from
+      # makeReleaseCopies() in build/release.js, which only runs under the
+      # external jquery-release tool, so reproduce that function here.
+      - name: Recreate the dist/cdn release copies
+        run: |
+          cat > /tmp/make-cdn-copies.js <<'CDNJS'
+          "use strict";
+
+          var fs = require( "fs" ),
+
+              version = JSON.parse( fs.readFileSync( "package.json", "utf8" ) ).version,
+
+              devFile = "dist/jquery.js",
+              minFile = "dist/jquery.min.js",
+              mapFile = "dist/jquery.min.map",
+
+              cdnFolder = "dist/cdn",
+
+              releaseFiles = {
+                  "jquery-VER.js": devFile,
+                  "jquery-VER.min.js": minFile,
+                  "jquery-VER.min.map": mapFile,
+                  "jquery.js": devFile,
+                  "jquery.min.js": minFile,
+                  "jquery.min.map": mapFile,
+                  "jquery-latest.js": devFile,
+                  "jquery-latest.min.js": minFile,
+                  "jquery-latest.min.map": mapFile
+              };
+
+          if ( !fs.existsSync( cdnFolder ) ) {
+              fs.mkdirSync( cdnFolder );
+          }
+
+          Object.keys( releaseFiles ).forEach(function( key ) {
+              var text,
+                  builtFile = releaseFiles[ key ],
+                  unpathedFile = key.replace( /VER/g, version ),
+                  releaseFile = cdnFolder + "/" + unpathedFile;
+
+              if ( /\.map$/.test( releaseFile ) ) {
+                  // Map files need to reference the new uncompressed name;
+                  // assume that all files reside in the same directory.
+                  text = fs.readFileSync( builtFile, "utf8" )
+                      .replace( /"file":"([^"]+)","sources":\["([^"]+)"\]/,
+                          "\"file\":\"" + unpathedFile.replace( /\.min\.map/, ".min.js" ) +
+                          "\",\"sources\":[\"" + unpathedFile.replace( /\.min\.map/, ".js" ) + "\"]" );
+                  fs.writeFileSync( releaseFile, text );
+              } else if ( /\.min\.js$/.test( releaseFile ) ) {
+                  // Remove the source map comment; it causes way too many problems.
+                  text = fs.readFileSync( builtFile, "utf8" )
+                      .replace( /\/\/# sourceMappingURL=\S+/, "" );
+                  fs.writeFileSync( releaseFile, text );
+              } else {
+                  fs.writeFileSync( releaseFile, fs.readFileSync( builtFile ) );
+              }
+              console.log( "File '" + releaseFile + "' created." );
+          });
+          CDNJS
+          node /tmp/make-cdn-copies.js
+
+      # Pack on the release-era runtime. The copy into the container's own
+      # filesystem is required: packing straight from a bind mount makes npm
+      # emit a tarball with no "package/" member prefix.
+      - name: npm pack on the release-era Node runtime
+        run: |
+          docker run --rm -v "$PWD":/src node:0.10-wheezy \
+            sh -c 'cp -r /src /build && rm -rf /build/.git /build/.github && cd /build && npm pack && cp jquery-1.11.1.tgz /src/'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: jquery-1.11.1.tgz
+          if-no-files-found: error

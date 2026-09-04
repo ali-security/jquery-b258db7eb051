@@ -1,3 +1,8 @@
 language: node_js
 node_js:
 - '0.10'
+script:
+# grunt: jsonlint + build + lint + uglify + dist (upstream's Travis command).
+- npm test
+# The QUnit suite itself, which upstream ran through TestSwarm rather than Travis.
+- bash test/run-qunit.sh

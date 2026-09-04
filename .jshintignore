@@ -10,3 +10,8 @@ test/data/readywaitasset.js
 test/data/readywaitloader.js
 test/data/support/csp.js
 test/data/support/getComputedSupport.js
+
+# CI-only headless runner: it is PhantomJS code (`phantom` global, no strict
+# wrapper), not part of the library or its suite, so the project's jshint
+# profile does not apply.
+test/phantom-runner.js
